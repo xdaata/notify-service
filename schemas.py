@@ -17,6 +17,7 @@ class EventResponse(BaseModel):
     event_type: str
     status: EventStatus
     created_at: datetime
+    error_message: str | None = None
 
     class Config:
-        from_attributes = True  # можно строить схему прямо из orm-объекта
+        from_attributes = True  # можно строить прямо из orm-объекта
