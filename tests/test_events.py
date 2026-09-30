@@ -1,5 +1,6 @@
 import uuid
-
+from db import async_session
+from models import Event
 from tests.conftest import TEST_PREFIX
 
 
@@ -61,3 +62,29 @@ async def test_get_event_returns_404(client):
     random_id = uuid.uuid4()
     response = await client.get(f"/events/{random_id}")
     assert response.status_code == 404
+
+
+async def test_create_event_returns_existing_on_key_collision(client):
+    key = f"{TEST_PREFIX}{uuid.uuid4()}"
+    # ключ уже в базе, но не в redis: имитация гонки
+    async with async_session() as session:
+        existing = Event(
+            event_type="user_registered",
+            payload={"user_id": 1},
+            idempotency_key=key,
+        )
+        session.add(existing)
+        await session.commit()
+        existing_id = str(existing.id)
+
+    response = await client.post(
+        "/events",
+        json={
+            "event_type": "user_registered",
+            "payload": {"user_id": 1},
+            "idempotency_key": key,
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == existing_id

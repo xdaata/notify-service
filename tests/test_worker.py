@@ -1,9 +1,10 @@
+import json
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from db import async_session
 from models import Event, EventStatus
 from tests.conftest import TEST_PREFIX
-from worker.main import MAX_ATTEMPTS, handle_event
+from worker.main import MAX_ATTEMPTS, handle_event, process_message
 
 
 async def _create_test_event():
@@ -72,3 +73,33 @@ async def test_handle_event_fails_after_max_attempts():
 
 async def test_handle_event_skips_unknown_id():
     assert await handle_event(uuid.uuid4()) is True
+
+
+def _fake_message(event_id):
+    message = MagicMock()
+    message.body = json.dumps({"event_id": str(event_id)}).encode()
+    message.ack = AsyncMock()
+    message.reject = AsyncMock()
+    return message
+
+
+async def test_process_message_acks_when_event_handled():
+    event_id = uuid.uuid4()
+    message = _fake_message(event_id)
+
+    with patch("worker.main.handle_event", new=AsyncMock(return_value=True)) as handle:
+        await process_message(message)
+
+    handle.assert_awaited_once_with(event_id)
+    message.ack.assert_awaited_once()
+    message.reject.assert_not_awaited()
+
+
+async def test_process_message_rejects_to_dlq_when_handling_failed():
+    message = _fake_message(uuid.uuid4())
+
+    with patch("worker.main.handle_event", new=AsyncMock(return_value=False)):
+        await process_message(message)
+
+    message.reject.assert_awaited_once_with(requeue=False)
+    message.ack.assert_not_awaited()

@@ -51,7 +51,7 @@ async def process_message(message: aio_pika.abc.AbstractIncomingMessage) -> None
         await message.reject(requeue=False)
 
 
-async def main() -> None:
+async def main() -> None:  # pragma: no cover
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
     async with connection:
         channel = await connection.channel()
