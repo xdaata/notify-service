@@ -1,3 +1,8 @@
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/notify_db
+  REDIS_URL: redis://redis:6379/0
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+
 services:
   postgres:
     image: postgres:16
@@ -10,7 +15,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -22,7 +27,7 @@ services:
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -30,13 +35,45 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672"   # AMQP — сюда стучится код
-      - "15672:15672" # веб-панель: http://localhost:15672 (guest/guest)
+      - "5672:5672"   # amqp
+      - "15672:15672" # веб-панель, guest/guest
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity" ]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  api:
+    build: .
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+    env_file: .env
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 10s
+
+  worker:
+    build: .
+    command: python -m worker.main
+    env_file: .env
+    environment: *app-env
+    restart: on-failure
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:
