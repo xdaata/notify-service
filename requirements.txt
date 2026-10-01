@@ -10,3 +10,4 @@ aio-pika
 pytest
 pytest-asyncio
 httpx
+pytest-cov
