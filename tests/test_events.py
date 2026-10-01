@@ -66,7 +66,6 @@ async def test_get_event_returns_404(client):
 
 async def test_create_event_returns_existing_on_key_collision(client):
     key = f"{TEST_PREFIX}{uuid.uuid4()}"
-    # ключ уже в базе, но не в redis: имитация гонки
     async with async_session() as session:
         existing = Event(
             event_type="user_registered",
@@ -88,3 +87,26 @@ async def test_create_event_returns_existing_on_key_collision(client):
 
     assert response.status_code == 202
     assert response.json()["id"] == existing_id
+
+
+async def test_list_events_returns_newest_first(client):
+    key = f"{TEST_PREFIX}{uuid.uuid4()}"
+    created = await client.post(
+        "/events",
+        json={
+            "event_type": "order_paid",
+            "payload": {"order_id": 1},
+            "idempotency_key": key,
+        },
+    )
+
+    response = await client.get("/events")
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == created.json()["id"]
+
+
+async def test_index_page_is_served(client):
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

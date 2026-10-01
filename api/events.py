@@ -1,6 +1,7 @@
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,8 @@ from messaging.publisher import publish_event
 from models import Event
 from redis_client import IDEMPOTENCY_TTL_SECONDS, redis_client
 from schemas import EventCreate, EventResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -20,6 +23,7 @@ async def create_event(data: EventCreate, db: AsyncSession = Depends(get_db)):
     if cached_id:
         existing = await db.get(Event, uuid.UUID(cached_id))
         if existing:
+            logger.info("idempotent hit id=%s", existing.id)
             return existing
 
     event = Event(
@@ -32,11 +36,11 @@ async def create_event(data: EventCreate, db: AsyncSession = Depends(get_db)):
         await db.commit()
     except Exception:
         await db.rollback()
-        # гонка: кто-то уже вставил такой же ключ, отдаём его
         result = await db.execute(
             select(Event).where(Event.idempotency_key == data.idempotency_key)
         )
         existing = result.scalar_one()
+        logger.info("idempotency key collision id=%s", existing.id)
         return existing
 
     await db.refresh(event)
@@ -45,8 +49,19 @@ async def create_event(data: EventCreate, db: AsyncSession = Depends(get_db)):
         f"idempotency:{data.idempotency_key}", str(event.id), ex=IDEMPOTENCY_TTL_SECONDS
     )
     await publish_event(event.id)
+    logger.info("event queued id=%s type=%s", event.id, event.event_type)
 
     return event
+
+
+@router.get("", response_model=list[EventResponse])
+async def list_events(
+        limit: int = Query(20, ge=1, le=100), db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(Event).order_by(Event.created_at.desc()).limit(limit)
+    )
+    return result.scalars().all()
 
 
 @router.get("/{event_id}", response_model=EventResponse)

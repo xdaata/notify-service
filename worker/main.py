@@ -1,12 +1,16 @@
 import asyncio
 import json
+import logging
 import uuid
 import aio_pika
 from config import settings
 from db import async_session
+from logging_config import setup_logging
 from messaging.broker import QUEUE_NAME, declare_queues
 from models import Event, EventStatus
 from worker.notifier import send_telegram_notification
+
+logger = logging.getLogger("worker")
 
 MAX_ATTEMPTS = 3
 BASE_DELAY = 1
@@ -16,7 +20,7 @@ async def handle_event(event_id: uuid.UUID) -> bool:
     async with async_session() as session:
         event = await session.get(Event, event_id)
         if event is None:
-            print(f"event {event_id} not found, skipping")
+            logger.warning("event not found id=%s, skipping", event_id)
             return True
 
         event.status = EventStatus.PROCESSING
@@ -28,17 +32,22 @@ async def handle_event(event_id: uuid.UUID) -> bool:
                 await send_telegram_notification(text)
             except Exception as exc:
                 event.error_message = str(exc)
-                print(f"attempt {attempt}/{MAX_ATTEMPTS} failed for {event_id}: {exc}")
+                logger.warning(
+                    "attempt %s/%s failed id=%s error=%s",
+                    attempt, MAX_ATTEMPTS, event_id, exc,
+                )
                 if attempt < MAX_ATTEMPTS:
                     await asyncio.sleep(BASE_DELAY * 2 ** (attempt - 1))
             else:
                 event.status = EventStatus.SENT
                 event.error_message = None
                 await session.commit()
+                logger.info("event sent id=%s attempt=%s", event_id, attempt)
                 return True
 
         event.status = EventStatus.FAILED
         await session.commit()
+        logger.error("event failed id=%s attempts=%s", event_id, MAX_ATTEMPTS)
         return False
 
 
@@ -52,13 +61,14 @@ async def process_message(message: aio_pika.abc.AbstractIncomingMessage) -> None
 
 
 async def main() -> None:  # pragma: no cover
+    setup_logging()
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
     async with connection:
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=10)
         queue = await declare_queues(channel)
 
-        print(f"worker started, listening on '{QUEUE_NAME}'")
+        logger.info("worker started, listening on '%s'", QUEUE_NAME)
         await queue.consume(process_message)
         await asyncio.Future()
 
