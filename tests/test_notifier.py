@@ -32,7 +32,10 @@ async def test_send_telegram_notification_posts_message():
     assert body["chat_id"] == settings.telegram_chat_id
 
 
-async def test_send_telegram_notification_raises_on_http_error():
+async def test_send_telegram_notification_raises_without_leaking_token():
     with _mock_telegram(lambda request: httpx.Response(401)):
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(RuntimeError) as exc_info:
             await send_telegram_notification("hello")
+
+    assert "401" in str(exc_info.value)
+    assert settings.telegram_bot_token not in str(exc_info.value)

@@ -9,4 +9,5 @@ async def send_telegram_notification(text: str) -> None:
         response = await client.post(
             url, json={"chat_id": settings.telegram_chat_id, "text": text}
         )
-        response.raise_for_status()
+    if response.is_error:
+        raise RuntimeError(f"telegram api returned {response.status_code}")
