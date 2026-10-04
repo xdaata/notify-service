@@ -1,183 +1,85 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Notify Service</title>
-    <style>
-        :root {
-            color-scheme: light dark;
-        }
-
-        body {
-            font-family: system-ui, sans-serif;
-            max-width: 900px;
-            margin: 2rem auto;
-            padding: 0 1rem;
-        }
-
-        h1 {
-            font-size: 1.3rem;
-        }
-
-        form {
-            display: grid;
-            gap: .6rem;
-            margin-bottom: 1rem;
-        }
-
-        label {
-            display: grid;
-            gap: .2rem;
-            font-size: .85rem;
-        }
-
-        input, textarea, button {
-            font: inherit;
-            padding: .4rem;
-        }
-
-        .row {
-            display: flex;
-            gap: .5rem;
-        }
-
-        .row input {
-            flex: 1;
-        }
-
-        #result {
-            font-family: monospace;
-            font-size: .85rem;
-            white-space: pre-wrap;
-            word-break: break-all;
-            min-height: 1.2rem;
-        }
-
-        .err {
-            color: #d33;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: .9rem;
-        }
-
-        th, td {
-            text-align: left;
-            padding: .35rem .5rem;
-            border-bottom: 1px solid #8884;
-        }
-
-        .badge {
-            padding: .1rem .5rem;
-            border-radius: 1rem;
-            font-size: .8rem;
-            color: #fff;
-            background: #888;
-        }
-
-        .badge.processing {
-            background: #27c;
-        }
-
-        .badge.sent {
-            background: #2a2;
-        }
-
-        .badge.failed {
-            background: #c33;
-        }
-
-        .wrap {
-            overflow-x: auto;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notify Service</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<h1>Notify Service</h1>
+<main>
+  <header>
+    <h1>Notify Service</h1>
+    <div class="top">
+      <span class="live" id="live" role="status"></span>
+      <button type="button" id="lang" class="lang" role="switch" aria-label="Язык / Language"><span class="thumb"></span><span class="opt">RU</span><span class="opt">EN</span></button>
+    </div>
+  </header>
 
-<form id="form">
-    <label>event type <input id="type" value="user_registered" required></label>
-    <label>payload (json) <textarea id="payload" rows="2">{"user_id": 1}</textarea></label>
-    <label>idempotency key
-        <span class="row"><input id="key" required><button type="button" id="newkey">new</button></span>
-    </label>
-    <label><span><input type="checkbox" id="keep"> keep key after send (to test idempotency)</span></label>
-    <button>Create event</button>
-</form>
-<div id="result"></div>
+  <section class="flow" aria-label="Events by status">
+    <div class="stage" data-s="queued">
+      <span class="n" id="n-queued">0</span>
+      <span class="name" data-i18n="queued"></span>
+      <span class="hint" data-i18n="hintQueued"></span>
+    </div>
+    <span class="link" aria-hidden="true"></span>
+    <div class="stage" data-s="processing">
+      <span class="n" id="n-processing">0</span>
+      <span class="name" data-i18n="processing"></span>
+      <span class="hint" data-i18n="hintProcessing"></span>
+    </div>
+    <span class="link" aria-hidden="true"></span>
+    <div class="stage" data-s="sent">
+      <span class="n" id="n-sent">0</span>
+      <span class="name" data-i18n="sent"></span>
+      <span class="hint" data-i18n="hintSent"></span>
+    </div>
+    <span class="split" aria-hidden="true"></span>
+    <div class="stage" data-s="failed">
+      <span class="n" id="n-failed">0</span>
+      <span class="name" data-i18n="failed"></span>
+      <span class="hint" data-i18n="hintFailed"></span>
+    </div>
+    <span class="scope" data-i18n="scope"></span>
+  </section>
 
-<h1>Events</h1>
-<div class="wrap">
-    <table>
-        <thead>
-        <tr>
-            <th>id</th>
-            <th>type</th>
-            <th>status</th>
-            <th>created</th>
-            <th>error</th>
-        </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-    </table>
-</div>
+  <div class="grid">
+    <section class="panel">
+      <h2 data-i18n="newEvent"></h2>
+      <form id="form">
+        <label><span data-i18n="type"></span>
+          <input type="text" id="type" value="user_registered" required>
+        </label>
+        <label><span data-i18n="payload"></span>
+          <textarea id="payload" spellcheck="false">{"user_id": 1}</textarea>
+        </label>
+        <label><span data-i18n="key"></span>
+          <span class="keyrow">
+            <input type="text" id="key" required spellcheck="false">
+            <button type="button" id="newkey" data-i18n="newKey"></button>
+          </span>
+        </label>
+        <label class="check"><input type="checkbox" id="keep"> <span data-i18n="keep"></span></label>
+        <button class="primary" id="send" data-i18n="create"></button>
+      </form>
+      <p id="say" aria-live="polite"></p>
+    </section>
 
-<script>
-    const $ = (id) => document.getElementById(id);
-    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-    }[c]));
-    const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    <section class="panel">
+      <h2 data-i18n="events"></h2>
+      <div class="banner" id="banner" hidden data-i18n="offline"></div>
+      <div class="row head" aria-hidden="true">
+        <span class="c-status" data-i18n="colStatus"></span>
+        <span class="c-type" data-i18n="colType"></span>
+        <span class="c-id" data-i18n="colId"></span>
+        <span class="c-time" data-i18n="colTime"></span>
+      </div>
+      <ul class="feed" id="feed"></ul>
+      <p class="empty" id="empty" hidden data-i18n="empty"></p>
+    </section>
+  </div>
+</main>
 
-    function show(text, isError) {
-        $("result").textContent = text;
-        $("result").className = isError ? "err" : "";
-    }
-
-    $("key").value = newKey();
-    $("newkey").onclick = () => ($("key").value = newKey());
-
-    $("form").onsubmit = async (e) => {
-        e.preventDefault();
-        let payload;
-        try {
-            payload = JSON.parse($("payload").value);
-        } catch {
-            return show("payload is not valid json", true);
-        }
-
-        const res = await fetch("/events", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({event_type: $("type").value, payload, idempotency_key: $("key").value}),
-        });
-        show(`${res.status} ${await res.text()}`, !res.ok);
-        if (res.ok && !$("keep").checked) $("key").value = newKey();
-        load();
-    };
-
-    async function load() {
-        const res = await fetch("/events?limit=20");
-        if (!res.ok) return;
-        const events = await res.json();
-        $("rows").innerHTML = events.map((e) => `<tr>
-    <td title="${e.id}">${e.id.slice(0, 8)}</td>
-    <td>${esc(e.event_type)}</td>
-    <td><span class="badge ${e.status}">${e.status}</span></td>
-    <td>${new Date(e.created_at).toLocaleTimeString()}</td>
-    <td>${esc(e.error_message ?? "")}</td>
-  </tr>`).join("");
-    }
-
-    load();
-    setInterval(load, 2000);
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>
