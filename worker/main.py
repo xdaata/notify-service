@@ -3,10 +3,12 @@ import json
 import logging
 import uuid
 import aio_pika
+from prometheus_client import start_http_server
 from config import settings
 from db import async_session
 from logging_config import setup_logging
 from messaging.broker import QUEUE_NAME, declare_queues
+from metrics import track_notification
 from models import Event, EventStatus
 from worker.notifier import send_telegram_notification
 
@@ -16,6 +18,7 @@ MAX_ATTEMPTS = 3
 BASE_DELAY = 1
 
 
+@track_notification
 async def handle_event(event_id: uuid.UUID) -> bool:
     async with async_session() as session:
         event = await session.get(Event, event_id)
@@ -62,6 +65,7 @@ async def process_message(message: aio_pika.abc.AbstractIncomingMessage) -> None
 
 async def main() -> None:  # pragma: no cover
     setup_logging()
+    start_http_server(8001)
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
     async with connection:
         channel = await connection.channel()
